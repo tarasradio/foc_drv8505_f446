@@ -3,10 +3,9 @@
 #include <GyverFilters.h>
 
 #include "STM32_CAN.h"
-
 #include "definitions.h"
-
 #include <drv8305.h>
+#include <move_controller.h>
 
 STM32_CAN Can1( CAN1, DEF );  //Use PA11/12 pins for CAN1.
 
@@ -80,6 +79,8 @@ BLDCMotor motor = BLDCMotor(MOTOR_PP);
 BLDCDriver6PWM driver = BLDCDriver6PWM(INH_A, INL_A, INH_B, INL_B, INH_C, INL_C);
 
 LowsideCurrentSense current_sense = LowsideCurrentSense(0.007f, 12.22f, SENSE_A, SENSE_B, SENSE_C);
+
+MoveController moveController(&motor);
 
 void configureMotor() {
   // control loop type and torque mode
@@ -206,13 +207,7 @@ void setup() {
 
 bool HUB_READY = false;
 
-//PIDController angle_pid(1000.0, 5.0, 0.005, 0, 1000.0);
-PIDController angle_pid(1000.0, 5.0, 0.005, 0, 1000.0);
-
-float target_angle = 0;
 float link_angle = 0;
-
-float m_speed = 0;
 
 float shift_angle(float raw_angle, float shift_value) {
 
@@ -283,145 +278,45 @@ long update_timer = micros();
 
 GMedian<10, float> filter;
 
-long move_timer = millis();
-
-#define MOVE_STATE_IDLE 0
-#define MOVE_STATE_UP 1
-#define MOVE_STATE_DOWN 2
-
-int move_state = MOVE_STATE_IDLE;
-
-int state = 0;
-
-void move_up() {
-  Serial.println(" Move Up");
-  motor.enable();
-  motor.move(UP_SPEED);
-}
-
-void move_down() {
-  Serial.println(" Move Down");
-  motor.enable();
-  motor.move(DOWN_SPEED);
-}
-
-//long move_timer = millis();
-
-const float amplitude = 30.0; // Амплитуда колебаний (половина размаха), в градусах
-const float offset = -30.0; // Смещение (среднее значение угла), в градусах
-
-const unsigned long periodMs = 2000; // Период колебаний (время одного цикла), в миллисекундах
-const unsigned long timeStepMs = 5; // Шаг по времени в миллисекундах
-
 float shifted_link_angle = 0;
 float angle_degrees = 0;
+float move_velocity = 0;
+
+void calc_move_params() {
+  link_angle = encoderB.getSensorAngle();
+
+  Serial.print(link_angle);
+  Serial.print(", ");
+
+  shifted_link_angle = shift_angle(link_angle, ANGLE_SHIFT);
+  angle_degrees = angle_to_degrees(shifted_link_angle);
+
+  Serial.print(angle_to_degrees(link_angle)); // Вывод угла в градусах
+  Serial.print(", ");
+  Serial.print(angle_to_degrees(shifted_link_angle)); // Вывод угла в градусах
+
+  float period_sec = 5000 / 10e6;
+
+  float dx = shifted_link_angle - last_angle;
+
+  last_angle = shifted_link_angle;
+
+  move_velocity = dx / period_sec;
+  move_velocity = filter.filtered(move_velocity);
+}
 
 void move_tick() {
   if(micros() - update_timer >= 5000) {
     update_timer = micros();
 
-    link_angle = encoderB.getSensorAngle();
+    calc_move_params();
+    can_send_angle(angle_degrees);
 
-    //Serial.print(link_angle);
-    //Serial.print(", ");
+    moveController.moveVersion1(angle_degrees, move_velocity);
 
-    shifted_link_angle = shift_angle(link_angle, ANGLE_SHIFT);
-    angle_degrees = angle_to_degrees(shifted_link_angle);
-
-    //if(HUB_READY == true) {
-      can_send_angle(angle_degrees);
-    //}
-
-    //Serial.print(angle_to_degrees(link_angle)); // Вывод угла в градусах
-    //Serial.print(", ");
-    Serial.print(angle_to_degrees(shifted_link_angle)); // Вывод угла в градусах
-
-    float period_sec = 5000 / 10e6;
-
-    float dx = shifted_link_angle - last_angle;
-
-    last_angle = shifted_link_angle;
-
-    float velocity = dx / period_sec;
-
-    velocity = filter.filtered(velocity);
-
-    //Serial.print(", ");
-    //Serial.print(velocity);
-    
-    // unsigned long elapsedTimeMs = millis();  //  millis() возвращает время с момента запуска Arduino
-    // float elapsedTimeSeconds = (float)elapsedTimeMs / 1000.0f;
-    // target_angle = offset + amplitude * sin(2 * PI * elapsedTimeSeconds / (periodMs / 1000.0f));  
-    // Умножаем на 2*PI для радиан, делим период на 1000, т.к. период в мс
-
-    // Serial.print(", gen angle = ");
-    // Serial.print(target_angle);
-
-    // Serial.println();
-
-    // if(shifted_link_angle < -60. || shifted_link_angle > 0) {
-    //   motor.disable();
-    // }
-
-    // if(angle_degrees > target_angle) {
-    //   move_down();
-    // } else if(angle_degrees <= target_angle) {
-    //   move_up();
-    // }
-
-    // if(state == 0) {
-    //   if(angle_degrees > target_angle) {
-    //     target_angle = -0.6;
-    //     state = 1;
-    //   }
-    // } else {
-    //   if(angle_degrees < target_angle) {
-    //     target_angle = 0;
-    //     state = 0;
-    //   }
-    // }
-
-    if(angle_degrees <= DOWN_LIMIT) {
-      Serial.print(" Down position limit");
-      motor.disable();
-      move_state = MOVE_STATE_IDLE;
-    } else if (angle_degrees >= UP_LIMIT) {
-      Serial.print(" Up position limit");
-      motor.disable();
-      move_state = MOVE_STATE_IDLE;
-    } else {
-      if(velocity > 10.0) {
-        if(move_state == MOVE_STATE_DOWN || move_state == MOVE_STATE_IDLE) {
-          if(millis() - move_timer >= 200) {
-            move_timer = millis();
-            move_state = MOVE_STATE_UP;
-            move_up();
-          }
-        }
-      } else if(velocity < -10.0) {
-        if(move_state == MOVE_STATE_UP || move_state == MOVE_STATE_IDLE) {
-          if(millis() - move_timer >= 200) {
-            move_timer = millis();
-            move_state = MOVE_STATE_DOWN;
-            move_down();
-          }
-        }
-      } else {
-        Serial.print(" Idle");
-        move_timer = millis();
-        motor.disable();
-        move_state = MOVE_STATE_IDLE;
-      }
-    }
-
-    float link_angle_error = target_angle - angle_degrees;
-    m_speed = angle_pid(link_angle_error);
-
-    //motor.move(m_speed);
+    Serial.println();
   }
 }
-
-
 
 void can_read() {
   if (Can1.read(CAN_RX_msg) ) {
@@ -469,9 +364,4 @@ void loop() {
   motor.loopFOC();
 
   move_tick();
-
-  // if(micros() - can_read_timer >= 5000) {
-  //   can_read_timer = micros();
-  //   can_read();
-  // }
 }
