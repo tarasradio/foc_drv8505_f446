@@ -6,6 +6,7 @@
 #include "definitions.h"
 #include <drv8305.h>
 #include <move_controller.h>
+#include <math_helpers.h>
 
 STM32_CAN Can1( CAN1, DEF );  //Use PA11/12 pins for CAN1.
 
@@ -208,28 +209,6 @@ void setup() {
 bool HUB_READY = false;
 
 float link_angle = 0;
-
-float shift_angle(float raw_angle, float shift_value) {
-
-  float sh_angle = raw_angle + shift_value;
-
-  if(sh_angle > 1.5*PI) {
-    sh_angle = sh_angle - 2*PI;
-  } else if(sh_angle > PI) {
-    sh_angle = PI - sh_angle;
-  } else if(sh_angle < -PI) {
-    sh_angle = 2*PI + sh_angle;
-  }
-
-  if(REVERSE_ANGLES) {
-    sh_angle = -sh_angle;
-  }
-  return sh_angle;
-}
-
-float angle_to_degrees(float angle) {
-  return angle * (180.0 / PI);
-}
 
 // Функция для преобразования float в массив byte
 void floatToBytes(float val, byte* bytes_array) {
