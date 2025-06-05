@@ -6,6 +6,8 @@
 
 #include "definitions.h"
 
+#include <drv8305.h>
+
 STM32_CAN Can1( CAN1, DEF );  //Use PA11/12 pins for CAN1.
 
 static CAN_message_t CAN_TX_msg;
@@ -71,68 +73,7 @@ MagneticSensorSPI encoderB = MagneticSensorSPI(AS5047P_SPI_Config_B, CS_ENC_B);
 
 SPIClass spiConnectionDRV(MOSI_DRV, MISO_DRV, CLK_DRV);
 
-void configureAmplierClamping(SPIClass spiConnectionToDRV) {
-  // Clamp sense amplifier output to 3.3V
-
-  digitalWrite(CS_DRV, LOW);
-  byte resp1 = spiConnectionToDRV.transfer(B01001100);
-  byte resp2 = spiConnectionToDRV.transfer(B10100000);
-  digitalWrite(CS_DRV, HIGH);
-
-  Serial.println("Configure Amplier Clamping");
-  Serial.print("Byte 0 : ");
-  Serial.println(resp1, BIN);
-  Serial.print("Byte 1 : ");
-  Serial.println(resp2, BIN);
-}
-
-void configure6PWM_Mode(SPIClass spiConnectionToDRV) {
-  // Set to three PWM inputs mode to 6PWM
-
-  digitalWrite(CS_DRV, LOW);
-  byte resp1 = spiConnectionToDRV.transfer(B00111010);
-  byte resp2 = spiConnectionToDRV.transfer(B0000110);
-  digitalWrite(CS_DRV, HIGH);
-
-  Serial.println("Configure 6PWM Mode");
-  Serial.print("Byte 0 : ");
-  Serial.println(resp1, BIN);
-  Serial.print("Byte 1 : ");
-  Serial.println(resp2, BIN);
-}
-
-void configure3PWM_Mode(SPIClass spiConnectionToDRV) {
-  // Set to three PWM inputs mode to 3PWM
-
-  digitalWrite(CS_DRV, LOW);
-  byte resp1 = spiConnectionToDRV.transfer(B00111010); // 0 - write, 0111 - 0x7 address, 0 1 01 000 01 10
-  byte resp2 = spiConnectionToDRV.transfer(B10000110);
-  digitalWrite(CS_DRV, HIGH);
-
-  Serial.println("Configure 3PWM Mode");
-  Serial.print("Byte 0 : ");
-  Serial.println(resp1, BIN);
-  Serial.print("Byte 1 : ");
-  Serial.println(resp2, BIN);
-}
-
-void drv8305Initialization()
-{
-  Serial.println("DRIVER: DRV8305 INIT");
-
-  pinMode(ENA_GATE, OUTPUT);
-  pinMode(CS_DRV, OUTPUT);
-  digitalWrite(CS_DRV, HIGH);
-
-  configure6PWM_Mode(spiConnectionDRV);
-  configureAmplierClamping(spiConnectionDRV);
-
-  _delay(500);
-
-  Serial.println("DRIVER: enGate Enabled");
-
-  digitalWrite(ENA_GATE, HIGH);
-}
+DRV8305 drv8305(&spiConnectionDRV, CS_DRV, ENA_GATE);
 
 BLDCMotor motor = BLDCMotor(MOTOR_PP);
 
@@ -151,8 +92,8 @@ void configureMotor() {
   // controller configuration based on the control type 
   // velocity PID controller parameters
   // default P=0.5 I = 10 D =0
-  motor.PID_velocity.P = 0.5;
-  motor.PID_velocity.I = 5;
+  motor.PID_velocity.P = 10;
+  motor.PID_velocity.I = 10;
   motor.PID_velocity.D = 0.001;
   // jerk control using voltage voltage ramp
   // default value is 300 volts per sec  ~ 0.3V per millisecond
@@ -162,7 +103,7 @@ void configureMotor() {
   // velocity low pass filtering
   // default 5ms - try different values to see what is the best. 
   // the lower the less filtered
-  motor.LPF_velocity.Tf = 0.2; // 0.01
+  motor.LPF_velocity.Tf = 0.01; // 0.01
   
   // // angle loop PID
   // motor.P_angle.P = 10.0;
@@ -195,14 +136,14 @@ void configureMotor() {
   
   
   // Limits
-  motor.velocity_limit = 800.0;
-  motor.voltage_limit = 5;
+  motor.velocity_limit = 1000.0;
+  motor.voltage_limit = 6;
 
-  motor.current_limit = 3.0;
+  motor.current_limit = 5.0;
 
   //  general settings
   //  pwm modulation settings
-  motor.foc_modulation = FOCModulationType::SinePWM;
+  motor.foc_modulation = FOCModulationType::SpaceVectorPWM; // FOCModulationType::SinePWM;
   motor.modulation_centered = 1.0;
 }
 
@@ -223,12 +164,12 @@ void setup() {
   spiConnectionDRV.setDataMode(SPI_MODE1);
   spiConnectionDRV.setClockDivider(SPI_CLOCK_DIV8);
 
-  drv8305Initialization();
+  drv8305.Init();
 
   motor.linkSensor(&encoderA);
 
   driver.voltage_power_supply = 14.4;
-  driver.voltage_limit = 5;
+  driver.voltage_limit = 7;
 
   driver.pwm_frequency = 20000;
   driver.dead_zone = 0.05;
@@ -265,19 +206,29 @@ void setup() {
 
 bool HUB_READY = false;
 
-PIDController angle_pid(800.0, 5.0, 0.005, 0, 500.0);
+//PIDController angle_pid(1000.0, 5.0, 0.005, 0, 1000.0);
+PIDController angle_pid(1000.0, 5.0, 0.005, 0, 1000.0);
 
-float target_angle = 2.5;
+float target_angle = 0;
 float link_angle = 0;
 
 float m_speed = 0;
 
 float shift_angle(float raw_angle, float shift_value) {
+
   float sh_angle = raw_angle + shift_value;
-  if(sh_angle > PI*2)
-    sh_angle = sh_angle - PI*2;
-  else if(sh_angle < 0)
-    sh_angle = PI*2 - sh_angle;
+
+  if(sh_angle > 1.5*PI) {
+    sh_angle = sh_angle - 2*PI;
+  } else if(sh_angle > PI) {
+    sh_angle = PI - sh_angle;
+  } else if(sh_angle < -PI) {
+    sh_angle = 2*PI + sh_angle;
+  }
+
+  if(REVERSE_ANGLES) {
+    sh_angle = -sh_angle;
+  }
   return sh_angle;
 }
 
@@ -309,9 +260,9 @@ void can_send_angle(float angle) {
   floatToBytes(angle, CAN_TX_msg.buf);
 
   if(Can1.write(CAN_TX_msg)) {
-    Serial.println("can send ok");
+    //Serial.println("can send ok");
   } else {
-    Serial.println("can send fail");
+    //Serial.println("can send fail");
   }
 }
 
@@ -320,11 +271,11 @@ void can_send_ready() {
   CAN_TX_msg.len = 1;
   CAN_TX_msg.buf[0] =  0x00;
 
-  if(Can1.write(CAN_TX_msg)) {
-    Serial.println("can send ok");
-  } else {
-    Serial.println("can send fail");
-  }
+  // if(Can1.write(CAN_TX_msg)) {
+  //   Serial.println("can send ok");
+  // } else {
+  //   Serial.println("can send fail");
+  // }
 }
 
 float last_angle = 0;
@@ -340,6 +291,8 @@ long move_timer = millis();
 
 int move_state = MOVE_STATE_IDLE;
 
+int state = 0;
+
 void move_up() {
   Serial.println(" Move Up");
   motor.enable();
@@ -352,13 +305,28 @@ void move_down() {
   motor.move(DOWN_SPEED);
 }
 
+//long move_timer = millis();
+
+const float amplitude = 30.0; // Амплитуда колебаний (половина размаха), в градусах
+const float offset = -30.0; // Смещение (среднее значение угла), в градусах
+
+const unsigned long periodMs = 2000; // Период колебаний (время одного цикла), в миллисекундах
+const unsigned long timeStepMs = 5; // Шаг по времени в миллисекундах
+
+float shifted_link_angle = 0;
+float angle_degrees = 0;
+
 void move_tick() {
   if(micros() - update_timer >= 5000) {
     update_timer = micros();
 
     link_angle = encoderB.getSensorAngle();
-    float shifted_link_angle = shift_angle(link_angle, ANGLE_SHIFT);
-    float angle_degrees = angle_to_degrees(shifted_link_angle);
+
+    //Serial.print(link_angle);
+    //Serial.print(", ");
+
+    shifted_link_angle = shift_angle(link_angle, ANGLE_SHIFT);
+    angle_degrees = angle_to_degrees(shifted_link_angle);
 
     //if(HUB_READY == true) {
       can_send_angle(angle_degrees);
@@ -366,7 +334,7 @@ void move_tick() {
 
     //Serial.print(angle_to_degrees(link_angle)); // Вывод угла в градусах
     //Serial.print(", ");
-    //Serial.print(angle_to_degrees(shifted_link_angle)); // Вывод угла в градусах
+    Serial.print(angle_to_degrees(shifted_link_angle)); // Вывод угла в градусах
 
     float period_sec = 5000 / 10e6;
 
@@ -379,16 +347,46 @@ void move_tick() {
     velocity = filter.filtered(velocity);
 
     //Serial.print(", ");
-    //Serial.print(period_sec);
-    //Serial.print(", ");
     //Serial.print(velocity);
+    
+    // unsigned long elapsedTimeMs = millis();  //  millis() возвращает время с момента запуска Arduino
+    // float elapsedTimeSeconds = (float)elapsedTimeMs / 1000.0f;
+    // target_angle = offset + amplitude * sin(2 * PI * elapsedTimeSeconds / (periodMs / 1000.0f));  
+    // Умножаем на 2*PI для радиан, делим период на 1000, т.к. период в мс
 
-    if(angle_to_degrees(shifted_link_angle) <= DOWN_LIMIT) {
-      //Serial.println(" Down position limit");
+    // Serial.print(", gen angle = ");
+    // Serial.print(target_angle);
+
+    // Serial.println();
+
+    // if(shifted_link_angle < -60. || shifted_link_angle > 0) {
+    //   motor.disable();
+    // }
+
+    // if(angle_degrees > target_angle) {
+    //   move_down();
+    // } else if(angle_degrees <= target_angle) {
+    //   move_up();
+    // }
+
+    // if(state == 0) {
+    //   if(angle_degrees > target_angle) {
+    //     target_angle = -0.6;
+    //     state = 1;
+    //   }
+    // } else {
+    //   if(angle_degrees < target_angle) {
+    //     target_angle = 0;
+    //     state = 0;
+    //   }
+    // }
+
+    if(angle_degrees <= DOWN_LIMIT) {
+      Serial.print(" Down position limit");
       motor.disable();
       move_state = MOVE_STATE_IDLE;
-    } else if (angle_to_degrees(shifted_link_angle) >= UP_LIMIT) {
-      //Serial.println(" Up position limit");
+    } else if (angle_degrees >= UP_LIMIT) {
+      Serial.print(" Up position limit");
       motor.disable();
       move_state = MOVE_STATE_IDLE;
     } else {
@@ -409,19 +407,21 @@ void move_tick() {
           }
         }
       } else {
-        //Serial.println(" Idle");
+        Serial.print(" Idle");
         move_timer = millis();
         motor.disable();
         move_state = MOVE_STATE_IDLE;
       }
     }
-    //Serial.println();
-    float link_angle_error = target_angle - link_angle;
-    m_speed = angle_pid(-link_angle_error);
+
+    float link_angle_error = target_angle - angle_degrees;
+    m_speed = angle_pid(link_angle_error);
+
+    //motor.move(m_speed);
   }
 }
 
-int state = 0;
+
 
 void can_read() {
   if (Can1.read(CAN_RX_msg) ) {
@@ -473,19 +473,5 @@ void loop() {
   // if(micros() - can_read_timer >= 5000) {
   //   can_read_timer = micros();
   //   can_read();
-  // }
-
-  // motor.move(m_speed);
-
-  // if(state == 0) {
-  //   if(link_angle > target_angle) {
-  //     target_angle = 0.6;
-  //     state = 1;
-  //   }
-  // } else {
-  //   if(link_angle < target_angle) {
-  //     target_angle = 2.5;
-  //     state = 0;
-  //   }
   // }
 }

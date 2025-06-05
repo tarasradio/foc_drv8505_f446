@@ -1,17 +1,20 @@
 #define LEFT
 //#define RIGHT
 
-#define L_90_VALUE 0.28
-#define R_90_VALUE 1.43
+#define L_0_VALUE 1.46
+#define R_0_VALUE 0.32
 
 #ifdef LEFT
 
-#define ANGLE_SHIFT PI/2 - L_90_VALUE
-#define UP_LIMIT 150
-#define DOWN_LIMIT 20
+#define ANGLE_SHIFT 0 - L_0_VALUE
 
-#define UP_SPEED 100
-#define DOWN_SPEED -100
+#define REVERSE_ANGLES true
+
+#define UP_LIMIT 50
+#define DOWN_LIMIT -70
+
+#define UP_SPEED 500
+#define DOWN_SPEED -500
 
 #define DRIVE_ANGLE_MSG 0x34A
 #define HUB_READY_MSG 0x25A
@@ -21,12 +24,14 @@
 
 #ifdef RIGHT
 
-#define ANGLE_SHIFT PI/2 - R_90_VALUE
-#define UP_LIMIT 150
-#define DOWN_LIMIT 20
+#define REVERSE_ANGLES false
 
-#define UP_SPEED -100
-#define DOWN_SPEED 100
+#define ANGLE_SHIFT 0 - R_0_VALUE
+#define UP_LIMIT 50
+#define DOWN_LIMIT -70
+
+#define UP_SPEED 300
+#define DOWN_SPEED -300
 
 #define DRIVE_ANGLE_MSG 0x34B
 #define HUB_READY_MSG 0x25B
