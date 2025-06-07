@@ -25,8 +25,23 @@ void DRV8305::Init() {
 
 void DRV8305::configure3PWM_Mode() {
   digitalWrite(cs_pin, LOW);
-  byte resp1 = spi->transfer(B00111010); // 0 - write, 0111 - 0x7 address, 0 1 01 000 01 10
-  byte resp2 = spi->transfer(B10000110);
+
+  uint16_t command =  (DRV8305_CMD_WRITE << 15) 
+                    | (DRV8305_GATE_DRIVE_CONTROL_REG << 11) 
+                    | (DRV8305_GDC_COMM_OPTION_AF << 9)
+                    | (DRV8305_GDC_PWM_MODE_3PWM << 7) 
+                    | (DRV8305_GDC_DEAD_TIME_35ns << 4)
+                    | (DRV8305_GDC_TBLANK_1us75 << 2) 
+                    | (DRV8305_GDC_TVDS_3us5 << 0);
+
+  uint8_t firstByte = (command >> 8);
+  uint8_t secondByte = (command);
+
+  int i = firstByte;
+
+  byte resp1 = spi->transfer(firstByte); // B00111010
+  byte resp2 = spi->transfer(secondByte); // B10000110
+  
   digitalWrite(cs_pin, HIGH);
 
   Serial.println("Configure 3PWM Mode");
@@ -38,7 +53,7 @@ void DRV8305::configure3PWM_Mode() {
 
 void DRV8305::configure6PWM_Mode() {
   digitalWrite(cs_pin, LOW);
-  byte resp1 = spi->transfer(B00111010);
+  byte resp1 = spi->transfer(B00111010); // 0 - write, 0111 - 0x7 address
   byte resp2 = spi->transfer(B0000110);
   digitalWrite(cs_pin, HIGH);
 
@@ -51,7 +66,7 @@ void DRV8305::configure6PWM_Mode() {
 
 void DRV8305::configureAmplierClamping() {
   digitalWrite(cs_pin, LOW);
-  byte resp1 = spi->transfer(B01001100);
+  byte resp1 = spi->transfer(B01001100); // 0 - write, 1001 - 0x9 address
   byte resp2 = spi->transfer(B10100000);
   digitalWrite(cs_pin, HIGH);
 
